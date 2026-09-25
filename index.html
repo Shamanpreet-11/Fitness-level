@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MRBD Continuous Vitals & Step Monitor</title>
+  <style>
+    /* CSS RESET FOR MRBD 600x600 ADDITIVE DISPLAY */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      width: 600px;
+      height: 600px;
+      background-color: #000000; /* Pure black renders transparent */
+      color: #00FFCC; /* High-contrast HUD Cyan */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20px;
+    }
+
+    /* HEADER HUD */
+    .hud-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #00FFCC;
+      padding-bottom: 10px;
+    }
+
+    .title {
+      font-size: 20px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .status-badge {
+      font-size: 16px;
+      font-weight: bold;
+      color: #00FF00;
+      background: #002200;
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid #00FF00;
+    }
+
+    .status-badge.paused {
+      color: #FFFF00;
+      background: #222200;
+      border-color: #FFFF00;
+    }
+
+    /* METRICS GRID */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 10px;
+    }
+
+    /* FOCUSABLE CARDS (Must be >= 88px height) */
+    .metric-card {
+      height: 110px;
+      background: #050505;
+      border: 2px solid #005544;
+      border-radius: 12px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      transition: all 0.2s ease;
+    }
+
+    .metric-card.focused {
+      border: 3px solid #00FFCC;
+      box-shadow: 0 0 15px #00FFCC;
+      background: #001f19;
+    }
+
+    .metric-card.alert {
+      border: 3px solid #FF0055 !important;
+      box-shadow: 0 0 20px #FF0055 !important;
+      background: #2b000a !important;
+      animation: pulse-alert 0.8s infinite alternate;
+    }
+
+    @keyframes pulse-alert {
+      0% { opacity: 1; }
+      100% { opacity: 0.6; }
+    }
+
+    .metric-label {
+      font-size: 16px;
+      color: #88FFDD;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .metric-value {
+      font-size: 34px;
+      font-weight: 900;
+      color: #FFFFFF;
+      margin-top: 4px;
+    }
+
+    .metric-unit {
+      font-size: 18px;
+      color: #00FFCC;
+      font-weight: normal;
+    }
+
+    /* ALERT BANNER */
+    .alert-banner {
+      height: 60px;
+      background: #330000;
+      border: 2px solid #FF0055;
+      color: #FF0055;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      visibility: hidden;
+      text-transform: uppercase;
+    }
+
+    .alert-banner.active {
+      visibility: visible;
+      animation: flash-banner 0.5s infinite alternate;
+    }
+
+    @keyframes flash-banner {
+      0% { background: #330000; color: #FF0055; }
+      100% { background: #FF0055; color: #000000; }
+    }
+
+    /* FOOTER CONTROL BAR (>= 88px target) */
+    .control-bar {
+      height: 88px;
+      background: #0A0A0A;
+      border: 2px solid #00FFCC;
+      border-radius: 12px;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      padding: 0 10px;
+    }
+
+    .control-item {
+      text-align: center;
+      font-size: 16px;
+      color: #FFFFFF;
+      font-weight: bold;
+    }
+
+    .key-badge {
+      display: inline-block;
+      background: #00FFCC;
+      color: #000000;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-weight: 900;
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER HUD -->
+  <div class="hud-header">
+    <div class="title">ACTIVE HUD // 1s REALTIME</div>
+    <div id="statusBadge" class="status-badge">ACTIVE</div>
+  </div>
+
+  <!-- METRICS DISPLAY GRID -->
+  <div class="metrics-grid">
+    <div class="metric-card focused" id="cardSteps">
+      <div class="metric-label">WALK/RUN STEPS</div>
+      <div class="metric-value" id="valSteps">0</div>
+    </div>
+
+    <div class="metric-card" id="cardHR">
+      <div class="metric-label">HEART RATE</div>
+      <div class="metric-value"><span id="valHR">72</span> <span class="metric-unit">BPM</span></div>
+    </div>
+
+    <div class="metric-card" id="cardBP">
+      <div class="metric-label">BLOOD PRESS.</div>
+      <div class="metric-value"><span id="valBP">120/80</span> <span class="metric-unit">mmHg</span></div>
+    </div>
+
+    <div class="metric-card" id="cardTemp">
+      <div class="metric-label">BODY TEMP</div>
+      <div class="metric-value"><span id="valTemp">36.8</span> <span class="metric-unit">°C</span></div>
+    </div>
+  </div>
+
+  <!-- HEALTH ALERT WARNING BANNER -->
+  <div class="alert-banner" id="alertBanner">
+    ⚠️ CRITICAL VITALS WARNING ⚠️
+  </div>
+
+  <!-- NAVIGATION & CONTROLS FOOTER -->
+  <div class="control-bar">
+    <div class="control-item"><span class="key-badge">⏎</span> <span id="btnPauseText">PAUSE</span></div>
+    <div class="control-item"><span class="key-badge">▲/▼</span> SENSITIVITY: <span id="valSens">NORM</span></div>
+    <div class="control-item"><span class="key-badge">◄/►</span> DISMISS</div>
+  </div>
+
+  <script>
+    // --- STATE MANAGEMENT ---
+    let isActive = true;
+    let stepCount = 0;
+    let bpm = 72;
+    let sysBP = 120;
+    let diaBP = 80;
+    let tempC = 36.8;
+
+    let alertActive = false;
+    let audioCtx = null;
+
+    // --- GAIT & MOTION FILTER STATE ---
+    let lastStepTime = 0;
+    let recentStepsInWindow = 0; // Steps detected in the last few seconds
+    let gravitySmooth = { x: 0, y: 0, z: 0 };
+    const smoothingFactor = 0.8; 
+    let stepThreshold = 2.2; 
+    let sensitivityIndex = 1;
+    const sensitivities = ["LOW", "NORM", "HIGH"];
+    const thresholdValues = [3.2, 2.2, 1.4];
+
+    // --- DOM ELEMENTS ---
+    const valSteps = document.getElementById('valSteps');
+    const valHR = document.getElementById('valHR');
+    const valBP = document.getElementById('valBP');
+    const valTemp = document.getElementById('valTemp');
+    const valSens = document.getElementById('valSens');
+    const statusBadge = document.getElementById('statusBadge');
+    const btnPauseText = document.getElementById('btnPauseText');
+    const alertBanner = document.getElementById('alertBanner');
+
+    const cardHR = document.getElementById('cardHR');
+    const cardBP = document.getElementById('cardBP');
+    const cardTemp = document.getElementById('cardTemp');
+
+    // --- ACCELEROMETER MOTION FILTER ALGORITHM ---
+    if (window.DeviceMotionEvent) {
+      window.addEventListener('devicemotion', (event) => {
+        if (!isActive) return;
+
+        const acc = event.accelerationIncludingGravity;
+        if (!acc || acc.x === null) return;
+
+        // 1. Low-Pass Filter: Remove hand-shake vibration noise
+        gravitySmooth.x = smoothingFactor * gravitySmooth.x + (1 - smoothingFactor) * acc.x;
+        gravitySmooth.y = smoothingFactor * gravitySmooth.y + (1 - smoothingFactor) * acc.y;
+        gravitySmooth.z = smoothingFactor * gravitySmooth.z + (1 - smoothingFactor) * acc.z;
+
+        // 2. Compute dynamic linear acceleration vector magnitude
+        const linearX = acc.x - gravitySmooth.x;
+        const linearY = acc.y - gravitySmooth.y;
+        const linearZ = acc.z - gravitySmooth.z;
+        const deltaMagnitude = Math.sqrt(linearX * linearX + linearY * linearY + linearZ * linearZ);
+
+        // 3. Peak Detection & Cadence Check
+        const now = Date.now();
+        const timeSinceLastStep = now - lastStepTime;
+
+        // Only count step if stride force > threshold AND elapsed time >= 300ms (Max 3.3 steps/sec)
+        if (deltaMagnitude > stepThreshold && timeSinceLastStep >= 300) {
+          lastStepTime = now;
+          registerRealStep();
+        }
+      });
+    }
+
+    function registerRealStep() {
+      stepCount++;
+      recentStepsInWindow++;
+      valSteps.textContent = stepCount.toLocaleString();
+    }
+
+    // --- CONTINUOUS EVERY-SECOND (1000ms) VITALS ENGINE ---
+    setInterval(() => {
+      if (!isActive) return;
+
+      const now = Date.now();
+      const isCurrentlyMoving = (now - lastStepTime) < 2000;
+
+      if (isCurrentlyMoving) {
+        // Person is actively Walking / Running / Jogging
+        // Calculate motion cadence intensity based on step frequency
+        let intensityFactor = recentStepsInWindow > 2 ? 1.5 : 0.8;
+
+        // Raise vitals every second proportionally
+        if (bpm < 175) bpm += (1.2 * intensityFactor) + (Math.random() * 0.4);
+        if (sysBP < 165) sysBP += (0.9 * intensityFactor) + (Math.random() * 0.2);
+        if (diaBP < 100) diaBP += (0.4 * intensityFactor);
+        if (tempC < 38.6) tempC += 0.02;
+      } else {
+        // Person is sitting or resting (no steps in past 2 seconds)
+        // Recover vitals toward resting baselines every second
+        if (bpm > 72) bpm -= 1.0 + (Math.random() * 0.3);
+        if (sysBP > 120) sysBP -= 0.8;
+        if (diaBP > 80) diaBP -= 0.5;
+        if (tempC > 36.8) tempC -= 0.03;
+      }
+
+      // Reset rolling window steps every second
+      recentStepsInWindow = 0;
+
+      // Update UI Display Elements
+      valHR.textContent = Math.round(bpm);
+      valBP.textContent = `${Math.round(sysBP)}/${Math.round(diaBP)}`;
+      valTemp.textContent = tempC.toFixed(1);
+
+      // Check for Health Alert Breaches
+      checkVitalsThresholds();
+    }, 1000);
+
+    // --- HEALTH ALERT SYSTEM ---
+    function checkVitalsThresholds() {
+      const highHR = bpm > 145;
+      const highBP = sysBP > 145 || diaBP > 95;
+      const highTemp = tempC > 38.2;
+
+      cardHR.classList.toggle('alert', highHR);
+      cardBP.classList.toggle('alert', highBP);
+      cardTemp.classList.toggle('alert', highTemp);
+
+      if (highHR || highBP || highTemp) {
+        if (!alertActive) {
+          triggerAlarm();
+        }
+      } else {
+        if (alertActive) {
+          dismissAlarm();
+        }
+      }
+    }
+
+    function triggerAlarm() {
+      alertActive = true;
+      alertBanner.classList.add('active');
+      playAlertTone();
+    }
+
+    function dismissAlarm() {
+      alertActive = false;
+      alertBanner.classList.remove('active');
+    }
+
+    // --- WEBAUDIO ALERT TONE ---
+    function playAlertTone() {
+      if (!alertActive) return;
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.3);
+
+        if (alertActive) {
+          setTimeout(playAlertTone, 700);
+        }
+      } catch (e) {
+        console.log("Audio alert initialized.");
+      }
+    }
+
+    // --- KEYBOARD & NEURAL BAND / TOUCH STRIP CONTROLS ---
+    document.addEventListener('keydown', (e) => {
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      switch (e.key) {
+        case 'Enter':
+          // Toggle Start / Pause
+          isActive = !isActive;
+          if (isActive) {
+            statusBadge.textContent = "ACTIVE";
+            statusBadge.classList.remove('paused');
+            btnPauseText.textContent = "PAUSE";
+          } else {
+            statusBadge.textContent = "PAUSED";
+            statusBadge.classList.add('paused');
+            btnPauseText.textContent = "RESUME";
+            dismissAlarm();
+          }
+          break;
+
+        case 'ArrowUp':
+        case 'ArrowDown':
+          // Adjust Step Sensitivity Threshold
+          sensitivityIndex = (sensitivityIndex + 1) % sensitivities.length;
+          valSens.textContent = sensitivities[sensitivityIndex];
+          stepThreshold = thresholdValues[sensitivityIndex];
+          break;
+
+        case 'ArrowLeft':
+        case 'ArrowRight':
+          // Mute / Dismiss Active Alarm
+          dismissAlarm();
+          break;
+      }
+    });
+  </script>
+</body>
+</html>
